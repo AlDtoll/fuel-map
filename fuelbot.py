@@ -66,6 +66,10 @@ def haversine(a,b,c,d):
 def has95(st):
     return st.get("status")=="yes" or "95" in (st.get("fuels_now") or "").split(",")
 
+def route_link(st):
+    # 2ГИС: построить маршрут до точки (старт = текущее местоположение юзера)
+    return f"https://2gis.ru/directions/points/{st['lon']}%2C{st['lat']}"
+
 # ───────────────────────── команды/сообщения ─────────────────────────
 def kb_main():
     return json.dumps({"inline_keyboard":[
@@ -137,7 +141,8 @@ def alert_loop():
                             api("sendMessage",{"chat_id":int(chat),
                                 "text":f"🟢 Появился бензин рядом!\n{st['name']}"
                                        f"{(' · '+st['addr']) if st.get('addr') else ''}\n"
-                                       f"~{dist:.1f} км от тебя · есть: {fuels}",
+                                       f"~{dist:.1f} км от тебя · есть: {fuels}\n"
+                                       f"🧭 Маршрут в 2ГИС: {route_link(st)}",
                                 "reply_markup":kb_main()})
                             sent[sid]=time.time(); changed=True
                     sub["sent"]=sent
