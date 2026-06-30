@@ -113,7 +113,7 @@ def kb_pro():
         [{"text":f"Неделя — {PRO_PLANS['7']} ⭐","callback_data":"buy:7"}],
         [{"text":f"Месяц — {PRO_PLANS['30']} ⭐","callback_data":"buy:30"}],
     ]})
-PRO_PITCH=("⭐ Есть Бензин Pro\n\n"
+PRO_PITCH=("⭐ Нужен Бензин Pro\n\n"
     "Бесплатно: карта, выбор топлива, алерты, радиус 5 км.\n\n"
     "Pro добавляет:\n"
     f"• 📍 Радиус слежения до {PRO_RADIUS} км вместо {FREE_RADIUS} — ловишь больше заправок вокруг.\n"
@@ -132,7 +132,7 @@ def kb_fuels(chat):
         [{"text":"Готово 🔔","callback_data":"fdone"}],
     ]})
 
-WELCOME=("⛽ Есть Бензин — карта наличия топлива.\nГорода: Краснодар, Новосибирск, Екатеринбург.\n\n"
+WELCOME=("⛽ Нужен Бензин — карта наличия топлива.\nГорода: Краснодар, Новосибирск, Екатеринбург.\n\n"
     "🗺 Жми «Открыть карту» — видно, где есть/очередь/нет бензина прямо сейчас "
     "(выбери город сверху; данные обновляются и дополняются водителями).\n\n"
     "🔔 «Следить» — пришли геолокацию, и я напишу, когда рядом с тобой на заправке "
@@ -222,7 +222,7 @@ def handle_callback(cb):
     elif (cb.get("data") or "").startswith("buy:"):
         days=cb["data"].split(":")[1]; price=PRO_PLANS.get(days)
         if price:
-            r=api("sendInvoice",{"chat_id":chat,"title":f"Есть Бензин Pro — {days} дн.",
+            r=api("sendInvoice",{"chat_id":chat,"title":f"Нужен Бензин Pro — {days} дн.",
                 "description":f"Мгновенные алерты + радиус {PRO_RADIUS} км на {days} дней.",
                 "payload":f"pro:{days}","currency":"XTR",
                 "prices":json.dumps([{"label":f"Pro {days} дн.","amount":price}])})
