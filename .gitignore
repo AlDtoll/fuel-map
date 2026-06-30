@@ -1,0 +1,4 @@
+__pycache__/
+*.log
+alert_state.json
+subscribers.json
