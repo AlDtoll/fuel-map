@@ -66,14 +66,10 @@ def haversine(a,b,c,d):
 def has95(st):
     return st.get("status")=="yes" or "95" in (st.get("fuels_now") or "").split(",")
 
-def route_link(st, sub=None):
-    # 2ГИС-маршрут. Точки в порядке старт→финиш (через %3B), внутри точки lon%2Clat.
-    # Одиночная точка трактуется как СТАРТ, поэтому ставим геолокацию юзера первой
-    # (старт), заправку — второй (финиш). Если юзера нет — только точка-финиш.
-    dest=f"{st['lon']}%2C{st['lat']}"
-    if sub:
-        return f"https://2gis.ru/directions/points/{sub['lon']}%2C{sub['lat']}%3B{dest}"
-    return f"https://2gis.ru/directions/points/{dest}"
+def station_link(st):
+    # Просто точка-заправка в 2ГИС — пользователь сам решит, строить маршрут или нет.
+    # (Маршрутный deep-link 2ГИС вёл себя неверно — вернёмся позже.)
+    return f"https://2gis.ru/geo/{st['lon']}%2C{st['lat']}"
 
 # ───────────────────────── команды/сообщения ─────────────────────────
 def kb_main():
@@ -147,7 +143,7 @@ def alert_loop():
                                 "text":f"🟢 Появился бензин рядом!\n{st['name']}"
                                        f"{(' · '+st['addr']) if st.get('addr') else ''}\n"
                                        f"~{dist:.1f} км от тебя · есть: {fuels}\n"
-                                       f"🧭 Маршрут в 2ГИС: {route_link(st, sub)}",
+                                       f"📍 Заправка в 2ГИС: {station_link(st)}",
                                 "reply_markup":kb_main()})
                             sent[sid]=time.time(); changed=True
                     sub["sent"]=sent
