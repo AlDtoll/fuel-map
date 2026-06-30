@@ -86,7 +86,8 @@ PENDING_FILE = os.path.join(DIR, "alert_pending.json")
 PRO_PLANS = {"7": 49, "30": 149}                 # дней: цена в ⭐
 FREE_RADIUS = 5
 PRO_RADIUS = 15
-FREE_DELAY = 15*60                               # Free-алерт с задержкой, Pro — мгновенно
+FREE_DELAY = 0                                   # задержку убрали: для бензина устаревший алерт = вред
+                                                 # (алерт расходился с картой). Pro отличается радиусом/зонами.
 
 def is_pro(chat):
     try: return jload(PRO_FILE,{}).get(str(chat),0) > time.time()
@@ -113,10 +114,11 @@ def kb_pro():
         [{"text":f"Месяц — {PRO_PLANS['30']} ⭐","callback_data":"buy:30"}],
     ]})
 PRO_PITCH=("⭐ Есть Бензин Pro\n\n"
-    "Бесплатно у тебя уже есть: карта, выбор топлива, 1 зона, радиус 5 км, алерты с задержкой ~15 мин.\n\n"
+    "Бесплатно: карта, выбор топлива, алерты, радиус 5 км.\n\n"
     "Pro добавляет:\n"
-    "• ⚡ Мгновенные алерты — узнаёшь ПЕРВЫМ (на дефиците это решает).\n"
-    f"• 📍 Радиус до {PRO_RADIUS} км вместо {FREE_RADIUS}.\n\n"
+    f"• 📍 Радиус слежения до {PRO_RADIUS} км вместо {FREE_RADIUS} — ловишь больше заправок вокруг.\n"
+    "• 🔝 Приоритетные уведомления.\n"
+    "• 🏠 (скоро) несколько зон: дом + работа.\n\n"
     "Оплата — Telegram Stars:")
 def kb_loc():
     return json.dumps({"keyboard":[[{"text":"📍 Отправить геолокацию","request_location":True}]],
