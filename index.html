@@ -73,9 +73,11 @@ function color(s){
 function ago(ts){const m=Math.floor((Date.now()-ts)/60000);if(m<1)return'только что';if(m<60)return m+' мин назад';return Math.floor(m/60)+' ч назад';}
 function stLabel(st){return st==='yes'?'есть':st==='queue'?'очередь':st==='no'?'нет':'нет данных';}
 
-const map=L.map('map',{zoomControl:false});
+const map=L.map('map',{zoomControl:false,attributionControl:false});
 L.control.zoom({position:'topright'}).addTo(map);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+// 2ГИС-тайлы (детальнее для РФ). subdomains 0-3.
+L.tileLayer('https://tile{s}.maps.2gis.com/tiles?x={x}&y={y}&z={z}&v=1.5',
+  {subdomains:['0','1','2','3'],maxZoom:18}).addTo(map);
 
 function popupHtml(s){
   const st=effStatus(s), fuels=effFuels(s);
