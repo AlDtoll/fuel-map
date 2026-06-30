@@ -89,6 +89,17 @@ PRO_RADIUS = 15
 FREE_DELAY = 0                                   # задержку убрали: для бензина устаревший алерт = вред
                                                  # (алерт расходился с картой). Pro отличается радиусом/зонами.
 
+USERS_FILE = os.path.join(DIR, "users.json")     # учёт пользователей бота
+def track(frm):
+    if not frm: return
+    try:
+        u=jload(USERS_FILE,{}); k=str(frm.get("id"))
+        rec=u.get(k,{"first":time.time(),"n":0})
+        rec["n"]=rec.get("n",0)+1; rec["last"]=time.time()
+        rec["name"]=("@"+frm["username"]) if frm.get("username") else (frm.get("first_name") or "")
+        u[k]=rec; jsave(USERS_FILE,u)
+    except Exception as e: log(f"track: {e}")
+
 def is_pro(chat):
     try: return jload(PRO_FILE,{}).get(str(chat),0) > time.time()
     except: return False
@@ -140,6 +151,7 @@ WELCOME=("⛽ Нужен Бензин — карта наличия топлив
 
 def handle_message(m):
     chat=m["chat"]["id"]
+    track(m.get("from"))
     sp=m.get("successful_payment")
     if sp:
         days=int((sp.get("invoice_payload") or "pro:7").split(":")[1])
@@ -187,6 +199,20 @@ def handle_message(m):
             api("sendMessage",{"chat_id":chat,"text":"У тебя уже активен Pro ⭐ Спасибо!"})
         else:
             api("sendMessage",{"chat_id":chat,"text":PRO_PITCH,"reply_markup":kb_pro()})
+    elif text.startswith("/stats") and chat==ADMIN_CHAT:
+        u=jload(USERS_FILE,{}); subs=jload(SUBS,{}); pro=jload(PRO_FILE,{}); now=time.time()
+        d1=sum(1 for r in u.values() if now-r.get("last",0)<86400)
+        wk=sum(1 for r in u.values() if now-r.get("last",0)<7*86400)
+        propaid=sum(1 for v in pro.values() if v>now)
+        top=sorted(u.items(),key=lambda x:-x[1].get("n",0))[:5]
+        tops="\n".join(f"  {r.get('name','?')} — {r.get('n',0)}" for _,r in top)
+        api("sendMessage",{"chat_id":chat,
+            "text":f"📊 Нужен Бензин — статистика\n"
+                   f"Всего пользователей: {len(u)}\n"
+                   f"Активны за сутки: {d1} · за неделю: {wk}\n"
+                   f"Подписок на алерты: {len(subs)}\n"
+                   f"Pro активных: {propaid}\n"
+                   f"Топ по активности:\n{tops or '  —'}"})
     elif text.startswith("/stop"):
         subs=jload(SUBS,{}); subs.pop(str(chat),None); jsave(SUBS,subs)
         api("sendMessage",{"chat_id":chat,"text":"🔕 Слежение отключено. Включить снова — /start."})
@@ -195,6 +221,7 @@ def handle_message(m):
 
 def handle_callback(cb):
     chat=cb["message"]["chat"]["id"]
+    track(cb.get("from"))
     api("answerCallbackQuery",{"callback_query_id":cb["id"]})
     if cb.get("data")=="watch":
         api("sendMessage",{"chat_id":chat,
