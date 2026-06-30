@@ -64,8 +64,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Ro
   <div><i style="background:#d2433a"></i>нет</div>
   <div><i style="background:#9aa0a6"></i>нет данных</div>
 </div>
-<button class="watchbtn" id="watchbtn" onclick="watchHere()">🔔 Следить отсюда</button>
-<button class="fab" onclick="locate()" title="Где я">📍</button>
+<button class="fab" id="mefab" onclick="recenterMe()" title="Где я" style="display:none">📍</button>
 
 <script>
 const FRESH_MS = 3*60*60*1000;
@@ -197,20 +196,20 @@ function buildCityBar(){
     b.onclick=()=>setCity(c.name); bar.appendChild(b);
   });
 }
-window.locate=function(){map.locate({setView:true,maxZoom:15});};
-window.watchHere=function(){
-  const tg=window.Telegram&&Telegram.WebApp;
-  if(!(tg&&tg.sendData)){ alert('Чтобы включить алерты, открой карту через кнопку «🗺 Открыть карту» в боте.'); return; }
-  if(!navigator.geolocation){ alert('Геолокация недоступна на этом устройстве.'); return; }
-  navigator.geolocation.getCurrentPosition(function(pos){
-    tg.sendData(JSON.stringify({action:'sub',lat:pos.coords.latitude,lon:pos.coords.longitude}));
-  }, function(){ alert('Не удалось получить геолокацию — разреши доступ и попробуй снова.'); },
-  {enableHighAccuracy:true,timeout:10000});
-};
-// в обычном браузере (не Telegram) кнопку слежения прячем
-if(!(window.Telegram&&Telegram.WebApp&&Telegram.WebApp.initData)){
-  var wb=document.getElementById('watchbtn'); if(wb) wb.style.display='none';
+// Карта НЕ просит гео сама. Точку («ты здесь») даёт БОТ через URL ?lat=&lon=&r=
+const _P=new URLSearchParams(location.search);
+const ME={lat:parseFloat(_P.get('lat')),lon:parseFloat(_P.get('lon')),r:parseFloat(_P.get('r'))||5};
+let meLayer=null;
+function showMe(){
+  if(isNaN(ME.lat)||isNaN(ME.lon)) return;
+  meLayer=L.layerGroup().addTo(map);
+  L.circle([ME.lat,ME.lon],{radius:ME.r*1000,color:'#2d8cff',weight:1,fillColor:'#2d8cff',fillOpacity:.07}).addTo(meLayer);
+  L.circleMarker([ME.lat,ME.lon],{radius:8,color:'#fff',weight:3,fillColor:'#2d8cff',fillOpacity:1}).addTo(meLayer)
+    .bindPopup('Ты здесь · слежу в радиусе '+ME.r+' км');
+  map.setView([ME.lat,ME.lon],13);
+  const f=document.getElementById('mefab'); if(f) f.style.display='block';
 }
+window.recenterMe=function(){ if(!isNaN(ME.lat)) map.setView([ME.lat,ME.lon],14); };
 map.on('locationfound',e=>{L.circleMarker(e.latlng,{radius:7,color:'#2d8cff',fillColor:'#2d8cff',fillOpacity:.9}).addTo(map);});
 
 function updatedStr(sec){
@@ -225,6 +224,7 @@ fetch('stations.json?v='+Date.now()).then(r=>r.json()).then(d=>{
   loadCity(function(saved){
     CITY=(saved && d.cities.some(c=>c.name===saved)) ? saved : (d.default_city||d.cities[0].name);
     setCity(CITY);
+    showMe();   // если бот передал точку в URL — показать «ты здесь» + радиус
   });
 });
 </script>

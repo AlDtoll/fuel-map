@@ -108,16 +108,33 @@ def add_pro(chat, days):
     p[str(chat)]=base + days*86400; jsave(PRO_FILE,p)
     return p[str(chat)]
 
+def map_url_for(chat):
+    # карта = дисплей: бот прокидывает точку юзера в URL, карта её рисует (сама гео НЕ просит)
+    sub=jload(SUBS,{}).get(str(chat))
+    if sub and sub.get("lat") is not None:
+        return f"{MAP_URL}?lat={sub['lat']:.5f}&lon={sub['lon']:.5f}&r={sub.get('radius',FREE_RADIUS)}"
+    return MAP_URL
+
+def sub_active(chat):
+    """Статус слежки: True=🟢 (Live активен ИЛИ свежий снимок), иначе 🟡."""
+    sub=jload(SUBS,{}).get(str(chat))
+    if not sub: return False
+    if sub.get("live"):
+        return sub.get("live_until",0) > time.time()
+    return (time.time()-sub.get("ts",0)) < 6*3600     # снимок «свежий» 6ч
+def status_line(chat):
+    return "🟢 Слежу за бензином рядом" if sub_active(chat) else "🟡 Слежка на паузе"
+
 # ───────────────────────── команды/сообщения ─────────────────────────
 ADMIN_CHAT = 579387502           # отзывы пересылаются сюда (Данил)
 FB_PENDING = set()               # юзеры, от кого ждём текст отзыва
 
-def kb_main():
+def kb_main(chat=None):
     return json.dumps({"inline_keyboard":[
-        [{"text":"🗺 Открыть карту","web_app":{"url":MAP_URL}}],
-        [{"text":"🔔 Следить за бензином рядом","callback_data":"watch"}],
-        [{"text":"⭐ Pro (быстрее + шире)","callback_data":"pro"}],
-        [{"text":"💬 Отзыв / сообщить о проблеме","callback_data":"feedback"}],
+        [{"text":"🗺 Открыть карту","web_app":{"url":map_url_for(chat) if chat else MAP_URL}}],
+        [{"text":"📡 Следить за бензином","callback_data":"watch"}],
+        [{"text":"⭐ Pro (радиус 15 км)","callback_data":"pro"}],
+        [{"text":"💬 Отзыв / проблема","callback_data":"feedback"}],
     ]})
 def kb_pro():
     return json.dumps({"inline_keyboard":[
@@ -132,7 +149,7 @@ PRO_PITCH=("⭐ Нужен Бензин Pro\n\n"
     "• 🏠 (скоро) несколько зон: дом + работа.\n\n"
     "Оплата — Telegram Stars:")
 def kb_loc():
-    return json.dumps({"keyboard":[[{"text":"📍 Отправить геолокацию","request_location":True}]],
+    return json.dumps({"keyboard":[[{"text":"📍 Караулить тут (разовая точка)","request_location":True}]],
         "resize_keyboard":True,"one_time_keyboard":True})
 def kb_map_reply():
     # reply-клавиатура с web_app: ТОЛЬКО так работает sendData из Mini App («Следить отсюда»)
@@ -147,13 +164,10 @@ def kb_fuels(chat):
         [{"text":"Готово 🔔","callback_data":"fdone"}],
     ]})
 
-WELCOME=("⛽ Нужен Бензин — карта наличия топлива.\nГорода: Краснодар, Новосибирск, Екатеринбург.\n\n"
-    "🗺 Жми «Открыть карту» — видно, где есть/очередь/нет бензина прямо сейчас "
-    "(выбери город сверху; данные обновляются и дополняются водителями).\n\n"
-    "🔔 Алерты — пришлю, когда рядом появится нужное топливо:\n"
-    "• Быстро: в карте жми «🔔 Следить отсюда».\n"
-    "• Лучше всего: 📎 → Геопозиция → «Транслировать» (1-8ч) — точка едет за тобой, "
-    "бот ищет вокруг текущего места, даже когда приложение закрыто.")
+WELCOME=("⛽ Нужен Бензин — карта наличия топлива.\nГорода: Новосибирск, Краснодар, Екатеринбург.\n\n"
+    "🗺 «Открыть карту» — где есть / очередь / нет бензина и какие марки.\n\n"
+    "📡 «Следить за бензином» — пришлю пуш, как рядом появится твоё топливо, "
+    "даже если закроешь Telegram. Лучший способ — Трансляция геопозиции (точка едет за тобой).")
 
 def handle_message(m):
     chat=m["chat"]["id"]
@@ -183,7 +197,7 @@ def handle_message(m):
         import datetime
         api("sendMessage",{"chat_id":chat,
             "text":f"🎉 Pro активирован на {days} дн.! Теперь алерты мгновенные и радиус {PRO_RADIUS} км. Спасибо 🙏",
-            "reply_markup":kb_main()})
+            "reply_markup":kb_main(chat)})
         log(f"PRO purchased chat={chat} +{days}d")
         return
     if "location" in m:
@@ -192,18 +206,19 @@ def handle_message(m):
         subs=jload(SUBS,{})
         prevsub=subs.get(str(chat)) or {}
         rad=PRO_RADIUS if is_pro(chat) else FREE_RADIUS
-        subs[str(chat)]={"lat":loc["latitude"],"lon":loc["longitude"],
-                         "radius":rad,"ts":time.time(),"sent":prevsub.get("sent",{}) if live else {},
-                         "fuels":prevsub.get("fuels",["95"]),"live":bool(live)}
-        jsave(SUBS,subs)
+        rec={"lat":loc["latitude"],"lon":loc["longitude"],
+             "radius":rad,"ts":time.time(),"sent":prevsub.get("sent",{}) if live else {},
+             "fuels":prevsub.get("fuels",["95"]),"live":bool(live)}
+        if live: rec["live_until"]=time.time()+int(live); rec["warned"]=False
+        subs[str(chat)]=rec; jsave(SUBS,subs)
         if live:
+            hrs=max(1,int(live)//3600)
             api("sendMessage",{"chat_id":chat,
-                "text":f"🛰 Трансляция включена! Слежу за бензином вокруг тебя (радиус {rad} км), "
-                       "точка едет за тобой, пока трансляция активна. За каким топливом?",
+                "text":f"🟢 Слежу! Трансляция активна ~{hrs} ч, точка едет за тобой (радиус {rad} км). За каким топливом?",
                 "reply_markup":kb_fuels(chat)})
         else:
             api("sendMessage",{"chat_id":chat,
-                "text":f"🔔 Точка принята! Слежу в радиусе {rad} км. За каким топливом?",
+                "text":f"🟢 Точка принята! Слежу в радиусе {rad} км. За каким топливом?",
                 "reply_markup":kb_fuels(chat)})
         return
     text=m.get("text","")
@@ -214,11 +229,11 @@ def handle_message(m):
         un=("@"+frm["username"]) if frm.get("username") else (frm.get("first_name") or "")
         api("sendMessage",{"chat_id":ADMIN_CHAT,
             "text":f"💬 Отзыв (Есть Бензин)\nот {un} (id {chat}):\n\n{text}"})
-        api("sendMessage",{"chat_id":chat,"text":"Спасибо! Отзыв отправлен 🙏","reply_markup":kb_main()})
+        api("sendMessage",{"chat_id":chat,"text":"Спасибо! Отзыв отправлен 🙏","reply_markup":kb_main(chat)})
         return
     if text.startswith("/start") or text.startswith("/help"):
-        api("sendMessage",{"chat_id":chat,"text":WELCOME,"reply_markup":kb_map_reply()})
-        api("sendMessage",{"chat_id":chat,"text":"Действия 👇","reply_markup":kb_main()})
+        api("sendMessage",{"chat_id":chat,"text":WELCOME+"\n\n"+status_line(chat),
+            "reply_markup":kb_main(chat)})
     elif text.startswith("/feedback"):
         FB_PENDING.add(chat)
         api("sendMessage",{"chat_id":chat,"text":"Напиши, что не так или что улучшить — передам разработчику 👇"})
@@ -245,7 +260,11 @@ def handle_message(m):
         subs=jload(SUBS,{}); subs.pop(str(chat),None); jsave(SUBS,subs)
         api("sendMessage",{"chat_id":chat,"text":"🔕 Слежение отключено. Включить снова — /start."})
     elif text.startswith("/map"):
-        api("sendMessage",{"chat_id":chat,"text":"Карта:","reply_markup":kb_main()})
+        api("sendMessage",{"chat_id":chat,"text":status_line(chat),"reply_markup":kb_main(chat)})
+    elif text.startswith("/watch"):
+        api("sendMessage",{"chat_id":chat,
+            "text":"Включить слежку:\n📡 Лучше всего — Трансляция геопозиции: 📎 → Геопозиция → «Транслировать» (8 ч).\n📍 Или разово — кнопка ниже:",
+            "reply_markup":kb_loc()})
 
 def handle_callback(cb):
     chat=cb["message"]["chat"]["id"]
@@ -253,7 +272,12 @@ def handle_callback(cb):
     api("answerCallbackQuery",{"callback_query_id":cb["id"]})
     if cb.get("data")=="watch":
         api("sendMessage",{"chat_id":chat,
-            "text":"Пришли свою геолокацию — и я буду следить за бензином рядом 👇",
+            "text":"Включи слежку — пришлю пуш, как только рядом появится твоё топливо "
+                   "(даже если закроешь Telegram).\n\n"
+                   "📡 Лучший способ — Трансляция геопозиции:\n"
+                   "📎 (скрепка) → Геопозиция → «Транслировать», выбери 8 ч.\n"
+                   "Точка едет за тобой, бот ищет вокруг текущего места.\n\n"
+                   "📍 Или разово, если стоишь тут — кнопка ниже:",
             "reply_markup":kb_loc()})
     elif cb.get("data")=="feedback":
         FB_PENDING.add(chat)
@@ -286,8 +310,9 @@ def handle_callback(cb):
         subs=jload(SUBS,{}); sub=subs.get(str(chat)) or {}
         fl=", ".join(sub.get("fuels",["95"]))
         api("sendMessage",{"chat_id":chat,
-            "text":f"🔔 Готово! Слежу за: {fl} (радиус {sub.get('radius',DEFAULT_RADIUS_KM)} км). "
-                   "Напишу, как появится рядом. Отключить — /stop.","reply_markup":kb_main()})
+            "text":f"{status_line(chat)} за: {fl} (радиус {sub.get('radius',FREE_RADIUS)} км).\n"
+                   "Напишу, как появится рядом. Открой карту — увидишь себя и заправки вокруг 👇\n"
+                   "Отключить — /stop.","reply_markup":kb_main(chat)})
 
 def handle_edited(em):
     # движение во время «Трансляции геопозиции» — двигаем точку слежения
@@ -298,10 +323,30 @@ def handle_edited(em):
         sub["lat"]=loc["latitude"]; sub["lon"]=loc["longitude"]; sub["live"]=True
         subs[str(chat)]=sub; jsave(SUBS,subs)
 
+def maintain_subs():
+    # Live: пинг за ~15 мин до конца + «на паузе» при истечении (никогда молча)
+    now=time.time(); subs=jload(SUBS,{}); changed=False
+    for chat,sub in list(subs.items()):
+        if not sub.get("live"): continue
+        lu=sub.get("live_until",0)
+        if not lu: continue
+        if now<lu and (lu-now)<15*60 and not sub.get("warned"):
+            sub["warned"]=True; changed=True
+            api("sendMessage",{"chat_id":int(chat),
+                "text":"⏳ Трансляция геопозиции скоро выключится. Продли, чтобы не терять слежку: 📎 → Геопозиция → Транслировать.",
+                "reply_markup":kb_main(int(chat))})
+        elif now>=lu and not sub.get("expired_notified"):
+            sub["live"]=False; sub["expired_notified"]=True; changed=True
+            api("sendMessage",{"chat_id":int(chat),
+                "text":"🟡 Слежка на паузе — трансляция закончилась. Включить снова — «📡 Следить».",
+                "reply_markup":kb_main(int(chat))})
+    if changed: jsave(SUBS,subs)
+
 # ───────────────────────── цикл алертов ─────────────────────────
 def alert_loop():
     while True:
         try:
+            maintain_subs()
             now=time.time()
             data=jload(STATIONS,{}); stations=data.get("stations",[])
             byid={s["id"]:s for s in stations}
@@ -319,6 +364,10 @@ def alert_loop():
                 evf=set(ev["fuels"]); age=now-ev["ts"]; st=byid.get(ev["sid"])
                 if not st: continue
                 for chat,sub in subs.items():
+                    # «на паузе» не алертим: истёкший Live или протухший снимок (>6ч)
+                    if sub.get("live"):
+                        if sub.get("live_until",0) <= now: continue
+                    elif now-sub.get("ts",0) > 6*3600: continue
                     pro=is_pro(chat)
                     if (not pro) and age<FREE_DELAY: continue       # Free ждёт задержку
                     watched=set(sub.get("fuels",["95"]))
@@ -329,12 +378,16 @@ def alert_loop():
                     sent=sub.setdefault("sent",{})
                     if now-sent.get(ev["sid"],0) < ALERT_COOLDOWN: continue
                     got=", ".join(sorted((evf&watched) or (evf-{"ANY"}))) or "бензин"
+                    agetag=""
+                    if not sub.get("live"):
+                        amin=int((now-sub.get("ts",0))/60)
+                        if amin>120: agetag=f"\n📍 твоя точка {amin//60} ч назад — уехал? обнови: /watch"
                     api("sendMessage",{"chat_id":int(chat),
                         "text":f"{'⚡ ' if pro else ''}🟢 Появилось рядом: {got}!\n{st['name']}"
                                f"{(' · '+st['addr']) if st.get('addr') else ''}\n"
                                f"~{dist:.1f} км · сейчас: {st.get('fuels_now') or 'есть'}\n"
-                               f"📍 Заправка в 2ГИС: {station_link(st)}",
-                            "reply_markup":kb_main()})
+                               f"📍 Заправка в 2ГИС: {station_link(st)}{agetag}",
+                            "reply_markup":kb_main(int(chat))})
                     sent[ev["sid"]]=now; changed=True; notified+=1
             if changed: jsave(SUBS,subs)
             pending=[ev for ev in pending if now-ev["ts"] < FREE_DELAY+600]
