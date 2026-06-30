@@ -66,6 +66,15 @@ def haversine(a,b,c,d):
 def has95(st):
     return st.get("status")=="yes" or "95" in (st.get("fuels_now") or "").split(",")
 
+FUEL_OPTS = ["92","95","98","100","ДТ","газ"]
+def avail_fuels(st):
+    """Множество доступных марок на АЗС. Если статус 'есть' без перечня — маркер 'ANY'
+    (бензин есть, марки неизвестны) — годится под любого наблюдателя."""
+    fs = set((st.get("fuels_now") or "").split(",")) - {""}
+    if st.get("status")=="yes" and not fs:
+        fs.add("ANY")
+    return fs
+
 def station_link(st):
     # Просто точка-заправка в 2ГИС — пользователь сам решит, строить маршрут или нет.
     # (Маршрутный deep-link 2ГИС вёл себя неверно — вернёмся позже.)
@@ -84,6 +93,14 @@ def kb_main():
 def kb_loc():
     return json.dumps({"keyboard":[[{"text":"📍 Отправить геолокацию","request_location":True}]],
         "resize_keyboard":True,"one_time_keyboard":True})
+def kb_fuels(chat):
+    subs=jload(SUBS,{}); sel=set((subs.get(str(chat)) or {}).get("fuels",["95"]))
+    btn=lambda g:{"text":("✅ " if g in sel else "")+g,"callback_data":"tf:"+g}
+    return json.dumps({"inline_keyboard":[
+        [btn("92"),btn("95"),btn("98")],
+        [btn("100"),btn("ДТ"),btn("газ")],
+        [{"text":"Готово 🔔","callback_data":"fdone"}],
+    ]})
 
 WELCOME=("⛽ Есть Бензин — карта наличия топлива.\nГорода: Краснодар, Новосибирск, Екатеринбург.\n\n"
     "🗺 Жми «Открыть карту» — видно, где есть/очередь/нет бензина прямо сейчас "
@@ -96,13 +113,16 @@ def handle_message(m):
     if "location" in m:
         loc=m["location"]
         subs=jload(SUBS,{})
+        prevsub=subs.get(str(chat)) or {}
         subs[str(chat)]={"lat":loc["latitude"],"lon":loc["longitude"],
-                         "radius":DEFAULT_RADIUS_KM,"ts":time.time(),"sent":{}}
+                         "radius":DEFAULT_RADIUS_KM,"ts":time.time(),"sent":{},
+                         "fuels":prevsub.get("fuels",["95"])}
         jsave(SUBS,subs)
         api("sendMessage",{"chat_id":chat,
-            "text":f"🔔 Готово! Слежу за заправками в радиусе {DEFAULT_RADIUS_KM} км. "
-                   "Напишу, как только рядом появится 95-й. Отключить — /stop.",
+            "text":f"🔔 Локация принята! Слежу в радиусе {DEFAULT_RADIUS_KM} км.\n"
+                   "За каким топливом следить? (по умолчанию 95) Отметь нужное:",
             "reply_markup":json.dumps({"remove_keyboard":True})})
+        api("sendMessage",{"chat_id":chat,"text":"⛽ Топливо для алертов:","reply_markup":kb_fuels(chat)})
         return
     text=m.get("text","")
     # режим отзыва: ждём текст от юзера → пересылаем Данилу
@@ -136,39 +156,59 @@ def handle_callback(cb):
         FB_PENDING.add(chat)
         api("sendMessage",{"chat_id":chat,
             "text":"Напиши, что не так или что улучшить — передам разработчику 👇"})
+    elif (cb.get("data") or "").startswith("tf:"):
+        g=cb["data"][3:]
+        subs=jload(SUBS,{}); sub=subs.get(str(chat))
+        if sub is not None:
+            fuels=set(sub.get("fuels",["95"]))
+            fuels.symmetric_difference_update({g})
+            if not fuels: fuels={"95"}          # хотя бы одно
+            sub["fuels"]=sorted(fuels); subs[str(chat)]=sub; jsave(SUBS,subs)
+            api("editMessageReplyMarkup",{"chat_id":chat,
+                "message_id":cb["message"]["message_id"],"reply_markup":kb_fuels(chat)})
+    elif cb.get("data")=="fdone":
+        subs=jload(SUBS,{}); sub=subs.get(str(chat)) or {}
+        fl=", ".join(sub.get("fuels",["95"]))
+        api("sendMessage",{"chat_id":chat,
+            "text":f"🔔 Готово! Слежу за: {fl} (радиус {sub.get('radius',DEFAULT_RADIUS_KM)} км). "
+                   "Напишу, как появится рядом. Отключить — /stop.","reply_markup":kb_main()})
 
 # ───────────────────────── цикл алертов ─────────────────────────
 def alert_loop():
     while True:
         try:
             data=jload(STATIONS,{}); stations=data.get("stations",[])
-            cur={s["id"]:has95(s) for s in stations}
             byid={s["id"]:s for s in stations}
-            prev=jload(LASTSTATE,{})
-            # «появился» = стало True там, где раньше было False/нет записи
-            appeared=[sid for sid,v in cur.items() if v and not prev.get(sid)]
-            jsave(LASTSTATE,cur)
+            cur={s["id"]:avail_fuels(s) for s in stations}
+            prevraw=jload(LASTSTATE,{})
+            prev={k:set(v) for k,v in prevraw.items() if isinstance(v,list)}
+            # пофуэльно: что НОВОГО появилось на каждой АЗС
+            appeared={sid:(av-prev.get(sid,set())) for sid,av in cur.items() if (av-prev.get(sid,set()))}
+            jsave(LASTSTATE,{sid:sorted(av) for sid,av in cur.items()})
             if appeared:
                 subs=jload(SUBS,{}); changed=False
                 for chat,sub in subs.items():
+                    watched=set(sub.get("fuels",["95"]))
                     sent=sub.get("sent",{})
-                    for sid in appeared:
-                        st=byid.get(sid);
+                    for sid,newf in appeared.items():
+                        # сработка: появилась наблюдаемая марка ИЛИ generic «есть» (ANY)
+                        if not (("ANY" in newf) or (newf & watched)): continue
+                        st=byid.get(sid)
                         if not st: continue
                         dist=haversine(sub["lat"],sub["lon"],st["lat"],st["lon"])
-                        if dist<=sub.get("radius",DEFAULT_RADIUS_KM):
-                            if time.time()-sent.get(sid,0) < ALERT_COOLDOWN: continue
-                            fuels=st.get("fuels_now") or "95"
-                            api("sendMessage",{"chat_id":int(chat),
-                                "text":f"🟢 Появился бензин рядом!\n{st['name']}"
-                                       f"{(' · '+st['addr']) if st.get('addr') else ''}\n"
-                                       f"~{dist:.1f} км от тебя · есть: {fuels}\n"
-                                       f"📍 Заправка в 2ГИС: {station_link(st)}",
-                                "reply_markup":kb_main()})
-                            sent[sid]=time.time(); changed=True
+                        if dist>sub.get("radius",DEFAULT_RADIUS_KM): continue
+                        if time.time()-sent.get(sid,0) < ALERT_COOLDOWN: continue
+                        got=", ".join(sorted((newf&watched) or (cur[sid]-{"ANY"}))) or "бензин"
+                        api("sendMessage",{"chat_id":int(chat),
+                            "text":f"🟢 Появилось рядом: {got}!\n{st['name']}"
+                                   f"{(' · '+st['addr']) if st.get('addr') else ''}\n"
+                                   f"~{dist:.1f} км от тебя · сейчас: {st.get('fuels_now') or 'есть'}\n"
+                                   f"📍 Заправка в 2ГИС: {station_link(st)}",
+                            "reply_markup":kb_main()})
+                        sent[sid]=time.time(); changed=True
                     sub["sent"]=sent
                 if changed: jsave(SUBS,subs)
-                log(f"alerts: appeared={len(appeared)} проверено подписчиков={len(subs)}")
+                log(f"alerts: станций с появлением={len(appeared)} подписчиков={len(subs)}")
         except Exception as e:
             log(f"alert_loop: {e}")
         time.sleep(POLL_ALERTS_SEC)
