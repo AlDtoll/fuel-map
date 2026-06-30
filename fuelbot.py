@@ -20,7 +20,7 @@ LASTSTATE = os.path.join(DIR, "alert_state.json")
 MAP_URL = "https://aldtoll.github.io/fuel-map/"
 DEFAULT_RADIUS_KM = 5
 ALERT_COOLDOWN = 6*60*60          # не повторять алерт по той же АЗС юзеру 6ч
-POLL_ALERTS_SEC = 420             # цикл алертов ~7 мин
+POLL_ALERTS_SEC = 300             # цикл алертов ~5 мин (Pro мгновенно, Free +FREE_DELAY)
 LOG = os.path.join(DIR, "bot.log")
 
 def log(m):
@@ -80,6 +80,22 @@ def station_link(st):
     # (Маршрутный deep-link 2ГИС вёл себя неверно — вернёмся позже.)
     return f"https://2gis.ru/geo/{st['lon']}%2C{st['lat']}"
 
+# ───────────────────────── Pro / Stars ─────────────────────────
+PRO_FILE = os.path.join(DIR, "pro_users.json")   # {str(uid): pro_until_epoch}
+PENDING_FILE = os.path.join(DIR, "alert_pending.json")
+PRO_PLANS = {"7": 49, "30": 149}                 # дней: цена в ⭐
+FREE_RADIUS = 5
+PRO_RADIUS = 15
+FREE_DELAY = 15*60                               # Free-алерт с задержкой, Pro — мгновенно
+
+def is_pro(chat):
+    try: return jload(PRO_FILE,{}).get(str(chat),0) > time.time()
+    except: return False
+def add_pro(chat, days):
+    p=jload(PRO_FILE,{}); base=max(p.get(str(chat),0), time.time())
+    p[str(chat)]=base + days*86400; jsave(PRO_FILE,p)
+    return p[str(chat)]
+
 # ───────────────────────── команды/сообщения ─────────────────────────
 ADMIN_CHAT = 579387502           # отзывы пересылаются сюда (Данил)
 FB_PENDING = set()               # юзеры, от кого ждём текст отзыва
@@ -88,8 +104,20 @@ def kb_main():
     return json.dumps({"inline_keyboard":[
         [{"text":"🗺 Открыть карту","web_app":{"url":MAP_URL}}],
         [{"text":"🔔 Следить за бензином рядом","callback_data":"watch"}],
+        [{"text":"⭐ Pro (быстрее + шире)","callback_data":"pro"}],
         [{"text":"💬 Отзыв / сообщить о проблеме","callback_data":"feedback"}],
     ]})
+def kb_pro():
+    return json.dumps({"inline_keyboard":[
+        [{"text":f"Неделя — {PRO_PLANS['7']} ⭐","callback_data":"buy:7"}],
+        [{"text":f"Месяц — {PRO_PLANS['30']} ⭐","callback_data":"buy:30"}],
+    ]})
+PRO_PITCH=("⭐ Есть Бензин Pro\n\n"
+    "Бесплатно у тебя уже есть: карта, выбор топлива, 1 зона, радиус 5 км, алерты с задержкой ~15 мин.\n\n"
+    "Pro добавляет:\n"
+    "• ⚡ Мгновенные алерты — узнаёшь ПЕРВЫМ (на дефиците это решает).\n"
+    f"• 📍 Радиус до {PRO_RADIUS} км вместо {FREE_RADIUS}.\n\n"
+    "Оплата — Telegram Stars:")
 def kb_loc():
     return json.dumps({"keyboard":[[{"text":"📍 Отправить геолокацию","request_location":True}]],
         "resize_keyboard":True,"one_time_keyboard":True})
@@ -110,6 +138,19 @@ WELCOME=("⛽ Есть Бензин — карта наличия топлива
 
 def handle_message(m):
     chat=m["chat"]["id"]
+    sp=m.get("successful_payment")
+    if sp:
+        days=int((sp.get("invoice_payload") or "pro:7").split(":")[1])
+        until=add_pro(chat, days)
+        # поднять радиус существующей подписке до Pro
+        subs=jload(SUBS,{})
+        if str(chat) in subs: subs[str(chat)]["radius"]=PRO_RADIUS; jsave(SUBS,subs)
+        import datetime
+        api("sendMessage",{"chat_id":chat,
+            "text":f"🎉 Pro активирован на {days} дн.! Теперь алерты мгновенные и радиус {PRO_RADIUS} км. Спасибо 🙏",
+            "reply_markup":kb_main()})
+        log(f"PRO purchased chat={chat} +{days}d")
+        return
     if "location" in m:
         loc=m["location"]
         subs=jload(SUBS,{})
@@ -139,6 +180,11 @@ def handle_message(m):
     elif text.startswith("/feedback"):
         FB_PENDING.add(chat)
         api("sendMessage",{"chat_id":chat,"text":"Напиши, что не так или что улучшить — передам разработчику 👇"})
+    elif text.startswith("/pro"):
+        if is_pro(chat):
+            api("sendMessage",{"chat_id":chat,"text":"У тебя уже активен Pro ⭐ Спасибо!"})
+        else:
+            api("sendMessage",{"chat_id":chat,"text":PRO_PITCH,"reply_markup":kb_pro()})
     elif text.startswith("/stop"):
         subs=jload(SUBS,{}); subs.pop(str(chat),None); jsave(SUBS,subs)
         api("sendMessage",{"chat_id":chat,"text":"🔕 Слежение отключено. Включить снова — /start."})
@@ -166,6 +212,19 @@ def handle_callback(cb):
             sub["fuels"]=sorted(fuels); subs[str(chat)]=sub; jsave(SUBS,subs)
             api("editMessageReplyMarkup",{"chat_id":chat,
                 "message_id":cb["message"]["message_id"],"reply_markup":kb_fuels(chat)})
+    elif cb.get("data")=="pro":
+        if is_pro(chat):
+            api("sendMessage",{"chat_id":chat,"text":"У тебя уже активен Pro ⭐ Спасибо!"})
+        else:
+            api("sendMessage",{"chat_id":chat,"text":PRO_PITCH,"reply_markup":kb_pro()})
+    elif (cb.get("data") or "").startswith("buy:"):
+        days=cb["data"].split(":")[1]; price=PRO_PLANS.get(days)
+        if price:
+            r=api("sendInvoice",{"chat_id":chat,"title":f"Есть Бензин Pro — {days} дн.",
+                "description":f"Мгновенные алерты + радиус {PRO_RADIUS} км на {days} дней.",
+                "payload":f"pro:{days}","currency":"XTR",
+                "prices":json.dumps([{"label":f"Pro {days} дн.","amount":price}])})
+            if not r.get("ok"): log(f"sendInvoice fail: {r}")
     elif cb.get("data")=="fdone":
         subs=jload(SUBS,{}); sub=subs.get(str(chat)) or {}
         fl=", ".join(sub.get("fuels",["95"]))
@@ -177,38 +236,44 @@ def handle_callback(cb):
 def alert_loop():
     while True:
         try:
+            now=time.time()
             data=jload(STATIONS,{}); stations=data.get("stations",[])
             byid={s["id"]:s for s in stations}
             cur={s["id"]:avail_fuels(s) for s in stations}
             prevraw=jload(LASTSTATE,{})
             prev={k:set(v) for k,v in prevraw.items() if isinstance(v,list)}
-            # пофуэльно: что НОВОГО появилось на каждой АЗС
-            appeared={sid:(av-prev.get(sid,set())) for sid,av in cur.items() if (av-prev.get(sid,set()))}
+            newly={sid:(av-prev.get(sid,set())) for sid,av in cur.items() if (av-prev.get(sid,set()))}
             jsave(LASTSTATE,{sid:sorted(av) for sid,av in cur.items()})
-            if appeared:
-                subs=jload(SUBS,{}); changed=False
+            # очередь «появилось»: Pro обрабатываем сразу, Free — после FREE_DELAY
+            pending=jload(PENDING_FILE,[])
+            for sid,nf in newly.items():
+                pending.append({"sid":sid,"fuels":sorted(nf),"ts":now})
+            subs=jload(SUBS,{}); changed=False; notified=0
+            for ev in pending:
+                evf=set(ev["fuels"]); age=now-ev["ts"]; st=byid.get(ev["sid"])
+                if not st: continue
                 for chat,sub in subs.items():
+                    pro=is_pro(chat)
+                    if (not pro) and age<FREE_DELAY: continue       # Free ждёт задержку
                     watched=set(sub.get("fuels",["95"]))
-                    sent=sub.get("sent",{})
-                    for sid,newf in appeared.items():
-                        # сработка: появилась наблюдаемая марка ИЛИ generic «есть» (ANY)
-                        if not (("ANY" in newf) or (newf & watched)): continue
-                        st=byid.get(sid)
-                        if not st: continue
-                        dist=haversine(sub["lat"],sub["lon"],st["lat"],st["lon"])
-                        if dist>sub.get("radius",DEFAULT_RADIUS_KM): continue
-                        if time.time()-sent.get(sid,0) < ALERT_COOLDOWN: continue
-                        got=", ".join(sorted((newf&watched) or (cur[sid]-{"ANY"}))) or "бензин"
-                        api("sendMessage",{"chat_id":int(chat),
-                            "text":f"🟢 Появилось рядом: {got}!\n{st['name']}"
-                                   f"{(' · '+st['addr']) if st.get('addr') else ''}\n"
-                                   f"~{dist:.1f} км от тебя · сейчас: {st.get('fuels_now') or 'есть'}\n"
-                                   f"📍 Заправка в 2ГИС: {station_link(st)}",
+                    if not (("ANY" in evf) or (evf & watched)): continue
+                    radius=PRO_RADIUS if pro else FREE_RADIUS
+                    dist=haversine(sub["lat"],sub["lon"],st["lat"],st["lon"])
+                    if dist>radius: continue
+                    sent=sub.setdefault("sent",{})
+                    if now-sent.get(ev["sid"],0) < ALERT_COOLDOWN: continue
+                    got=", ".join(sorted((evf&watched) or (evf-{"ANY"}))) or "бензин"
+                    api("sendMessage",{"chat_id":int(chat),
+                        "text":f"{'⚡ ' if pro else ''}🟢 Появилось рядом: {got}!\n{st['name']}"
+                               f"{(' · '+st['addr']) if st.get('addr') else ''}\n"
+                               f"~{dist:.1f} км · сейчас: {st.get('fuels_now') or 'есть'}\n"
+                               f"📍 Заправка в 2ГИС: {station_link(st)}",
                             "reply_markup":kb_main()})
-                        sent[sid]=time.time(); changed=True
-                    sub["sent"]=sent
-                if changed: jsave(SUBS,subs)
-                log(f"alerts: станций с появлением={len(appeared)} подписчиков={len(subs)}")
+                    sent[ev["sid"]]=now; changed=True; notified+=1
+            if changed: jsave(SUBS,subs)
+            pending=[ev for ev in pending if now-ev["ts"] < FREE_DELAY+600]
+            jsave(PENDING_FILE,pending)
+            if newly or notified: log(f"alerts: новых={len(newly)} отправлено={notified} pending={len(pending)}")
         except Exception as e:
             log(f"alert_loop: {e}")
         time.sleep(POLL_ALERTS_SEC)
@@ -222,7 +287,7 @@ def main():
     threading.Thread(target=alert_loop, daemon=True).start()
     offset=None
     while True:
-        p={"timeout":50,"allowed_updates":json.dumps(["message","callback_query"])}
+        p={"timeout":50,"allowed_updates":json.dumps(["message","callback_query","pre_checkout_query"])}
         if offset is not None: p["offset"]=offset
         upd=api("getUpdates",p)
         if not upd.get("ok"): time.sleep(3); continue
@@ -231,6 +296,8 @@ def main():
             try:
                 if "message" in u: handle_message(u["message"])
                 elif "callback_query" in u: handle_callback(u["callback_query"])
+                elif "pre_checkout_query" in u:
+                    api("answerPreCheckoutQuery",{"pre_checkout_query_id":u["pre_checkout_query"]["id"],"ok":"true"})
             except Exception as e: log(f"handler: {e}")
 
 if __name__=="__main__":
