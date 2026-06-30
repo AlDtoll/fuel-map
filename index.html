@@ -34,6 +34,8 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Ro
 .fab{position:absolute;bottom:24px;right:16px;z-index:1000;background:#3ea37a;color:#fff;border:none;
   width:54px;height:54px;border-radius:50%;font-size:24px;box-shadow:0 6px 18px rgba(0,0,0,.4)}
 .pop b{font-size:14px}.pop .cur{font-size:12px;margin-top:3px}
+.pop .fresh{font-size:11px;color:#7a818b;margin-top:6px}
+.pop .warn{font-size:11px;color:#e0a33a;margin-top:5px}
 .pop .chips{margin:7px 0 4px}
 .pop .chip{display:inline-block;background:#2a2e35;color:#cfe;border-radius:6px;padding:2px 7px;font-size:11px;margin:2px 3px 0 0}
 .pop .lbl{font-size:11px;color:#888;margin-top:9px}
@@ -105,8 +107,10 @@ function popupHtml(s){
   const chips = fuels ? `<div class="chips">Сейчас: ${fuels.split(',').map(f=>`<span class="chip">${f}</span>`).join('')}</div>` : '';
   const sel = (selFuel[s.id]||[]);
   const fuelBtns = FUELS.map(f=>`<button class="${sel.indexOf(f)>=0?'on':''}" onclick="togF('${s.id}','${f}')">${f}</button>`).join('');
+  const confl = s.conflict ? `<div class="warn">⚠️ Противоречивые отчёты — лучше уточнить</div>` : '';
+  const fr = `<div class="fresh">🕒 данные ${updatedStr(DATA.updated).replace('обновлено ','')} · статусы быстро меняются, проверяйте на месте</div>`;
   return `<div class="pop"><b>${s.name}</b>${s.addr?' · '+s.addr:''}
-    <div class="cur">${cur}</div>${chips}
+    <div class="cur">${cur}</div>${chips}${confl}${fr}
     <div class="lbl">Отметить наличие (выбери топливо, если есть):</div>
     <div class="fuelsel">${fuelBtns}</div>
     <div class="rep">
