@@ -22,6 +22,12 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Ro
 .citybar button{flex:0 0 auto;background:#22252b;color:#cfe;border:1px solid #333a42;
   border-radius:16px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
 .citybar button.on{background:#3ea37a;border-color:#3ea37a;color:#fff}
+.fuelbar{position:absolute;top:84px;left:0;right:0;z-index:998;display:flex;gap:5px;align-items:center;
+  padding:5px 12px;overflow-x:auto;background:rgba(20,22,26,.7);backdrop-filter:blur(4px)}
+.fuelbar .lab{color:#6f767e;font-size:11px;flex:0 0 auto;margin-right:2px}
+.fuelbar button{flex:0 0 auto;background:#22252b;color:#cfe;border:1px solid #333a42;
+  border-radius:13px;padding:4px 11px;font-size:12px;cursor:pointer;white-space:nowrap}
+.fuelbar button.on{background:#3ea37a;border-color:#3ea37a;color:#fff}
 .legend{position:absolute;bottom:88px;left:12px;z-index:1000;background:rgba(20,22,26,.92);
   color:#fff;border-radius:10px;padding:9px 11px;font-size:12.5px;line-height:1.75}
 .legend i{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:7px;vertical-align:middle}
@@ -43,6 +49,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Ro
 <body>
 <div class="topbar"><b>⛽ Есть Бензин</b><span class="city" id="city">…</span></div>
 <div class="citybar" id="citybar"></div>
+<div class="fuelbar" id="fuelbar"><span class="lab">топливо:</span></div>
 <div id="map"></div>
 <div class="legend">
   <div><i style="background:#2e9e5b"></i>есть</div>
@@ -57,8 +64,9 @@ const FRESH_MS = 3*60*60*1000;
 const FUELS = ['92','95','98','100','ДТ','Газ'];
 const RKEY = 'fuelmap_reports_v2';
 let reports = load();          // локальные отметки (Phase A): {id:{status, fuels:[], ts}}
-let DATA=null, layer=null, selFuel={}, CITY=null;
+let DATA=null, layer=null, selFuel={}, CITY=null, GRADE='Все';
 const CKEY='fuelmap_city';
+const GRADES=['Все','95','92','98','100','ДТ'];
 
 try{ if(window.Telegram&&Telegram.WebApp){Telegram.WebApp.expand();Telegram.WebApp.ready();} }catch(e){}
 function load(){ try{return JSON.parse(localStorage.getItem(RKEY))||{}}catch(e){return {}} }
@@ -116,19 +124,37 @@ window.rep=function(id,status){
 };
 
 function cityStations(){ return DATA.stations.filter(s=>s.city===CITY); }
+function visibleStations(){
+  let ss=cityStations();
+  if(GRADE!=='Все') ss=ss.filter(s=>effFuels(s).split(',').indexOf(GRADE)>=0);
+  return ss;
+}
 function draw(){
   if(layer)layer.remove();
   layer=L.layerGroup().addTo(map);
-  cityStations().forEach(s=>{
+  visibleStations().forEach(s=>{
     const m=L.circleMarker([s.lat,s.lon],{radius:8,weight:2,color:'#fff',fillColor:color(s),fillOpacity:1}).addTo(layer);
     m.bindPopup(()=>popupHtml(s),{maxWidth:290}); s._m=m;
   });
 }
 function updateStats(){
-  const ss=cityStations();
+  const ss=visibleStations();
   const yes=ss.filter(s=>effStatus(s)==='yes').length, q=ss.filter(s=>effStatus(s)==='queue').length;
-  document.getElementById('city').innerHTML=`${CITY} · ${ss.length} АЗС · 🟢${yes} · 🟠${q}`+
+  const gtag=GRADE==='Все'?'':` · ${GRADE}`;
+  document.getElementById('city').innerHTML=`${CITY}${gtag} · ${ss.length} АЗС · 🟢${yes} · 🟠${q}`+
     `<br><span style="font-size:11px;color:#6f767e">🕒 ${updatedStr(DATA.updated)}</span>`;
+}
+function setGrade(g){
+  GRADE=g;
+  document.querySelectorAll('#fuelbar button').forEach(b=>b.classList.toggle('on',b.dataset.g===g));
+  draw(); updateStats();
+}
+function buildFuelBar(){
+  const bar=document.getElementById('fuelbar');
+  GRADES.forEach(g=>{
+    const b=document.createElement('button'); b.textContent=g; b.dataset.g=g;
+    if(g===GRADE)b.classList.add('on'); b.onclick=()=>setGrade(g); bar.appendChild(b);
+  });
 }
 function setCity(name){
   CITY=name; try{localStorage.setItem(CKEY,name)}catch(e){}
@@ -158,7 +184,7 @@ fetch('stations.json?v='+Date.now()).then(r=>r.json()).then(d=>{
   DATA=d;
   let saved=null; try{saved=localStorage.getItem(CKEY)}catch(e){}
   CITY=(saved && d.cities.some(c=>c.name===saved)) ? saved : (d.default_city||d.cities[0].name);
-  buildCityBar(); setCity(CITY);
+  buildCityBar(); buildFuelBar(); setCity(CITY);
 });
 </script>
 </body>
