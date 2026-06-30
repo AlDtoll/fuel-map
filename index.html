@@ -14,6 +14,11 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Ro
 .topbar{position:absolute;top:0;left:0;right:0;z-index:1000;background:rgba(20,22,26,.92);
   color:#fff;padding:9px 14px;display:flex;align-items:center;gap:10px;backdrop-filter:blur(6px)}
 .topbar b{font-size:15px}.topbar .city{color:#8a929c;font-size:12px;margin-left:auto;text-align:right;line-height:1.3}
+.citybar{position:absolute;top:42px;left:0;right:0;z-index:999;display:flex;gap:6px;
+  padding:7px 12px;overflow-x:auto;background:rgba(20,22,26,.82);backdrop-filter:blur(6px)}
+.citybar button{flex:0 0 auto;background:#22252b;color:#cfe;border:1px solid #333a42;
+  border-radius:16px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.citybar button.on{background:#3ea37a;border-color:#3ea37a;color:#fff}
 .legend{position:absolute;bottom:88px;left:12px;z-index:1000;background:rgba(20,22,26,.92);
   color:#fff;border-radius:10px;padding:9px 11px;font-size:12.5px;line-height:1.75}
 .legend i{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:7px;vertical-align:middle}
@@ -33,7 +38,8 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Ro
 </style>
 </head>
 <body>
-<div class="topbar"><b>⛽ Где бензин</b><span class="city" id="city">…</span></div>
+<div class="topbar"><b>⛽ Есть Бензин</b><span class="city" id="city">…</span></div>
+<div class="citybar" id="citybar"></div>
 <div id="map"></div>
 <div class="legend">
   <div><i style="background:#2e9e5b"></i>есть</div>
@@ -48,7 +54,8 @@ const FRESH_MS = 3*60*60*1000;
 const FUELS = ['92','95','98','100','ДТ','Газ'];
 const RKEY = 'fuelmap_reports_v2';
 let reports = load();          // локальные отметки (Phase A): {id:{status, fuels:[], ts}}
-let DATA=null, layer=null, selFuel={};
+let DATA=null, layer=null, selFuel={}, CITY=null;
+const CKEY='fuelmap_city';
 
 try{ if(window.Telegram&&Telegram.WebApp){Telegram.WebApp.expand();Telegram.WebApp.ready();} }catch(e){}
 function load(){ try{return JSON.parse(localStorage.getItem(RKEY))||{}}catch(e){return {}} }
@@ -105,12 +112,33 @@ window.rep=function(id,status){
   try{if(window.Telegram&&Telegram.WebApp&&Telegram.WebApp.HapticFeedback)Telegram.WebApp.HapticFeedback.impactOccurred('light');}catch(e){}
 };
 
+function cityStations(){ return DATA.stations.filter(s=>s.city===CITY); }
 function draw(){
   if(layer)layer.remove();
   layer=L.layerGroup().addTo(map);
-  DATA.stations.forEach(s=>{
+  cityStations().forEach(s=>{
     const m=L.circleMarker([s.lat,s.lon],{radius:8,weight:2,color:'#fff',fillColor:color(s),fillOpacity:1}).addTo(layer);
     m.bindPopup(()=>popupHtml(s),{maxWidth:290}); s._m=m;
+  });
+}
+function updateStats(){
+  const ss=cityStations();
+  const yes=ss.filter(s=>effStatus(s)==='yes').length, q=ss.filter(s=>effStatus(s)==='queue').length;
+  document.getElementById('city').innerHTML=`${CITY} · ${ss.length} АЗС · 🟢${yes} · 🟠${q}`+
+    `<br><span style="font-size:11px;color:#6f767e">🕒 ${updatedStr(DATA.updated)}</span>`;
+}
+function setCity(name){
+  CITY=name; try{localStorage.setItem(CKEY,name)}catch(e){}
+  const c=(DATA.cities.find(x=>x.name===name)||{}).center;
+  if(c) map.setView(c,12);
+  document.querySelectorAll('#citybar button').forEach(b=>b.classList.toggle('on',b.dataset.city===name));
+  draw(); updateStats();
+}
+function buildCityBar(){
+  const bar=document.getElementById('citybar'); bar.innerHTML='';
+  DATA.cities.forEach(c=>{
+    const b=document.createElement('button'); b.textContent=c.name; b.dataset.city=c.name;
+    b.onclick=()=>setCity(c.name); bar.appendChild(b);
   });
 }
 window.locate=function(){map.locate({setView:true,maxZoom:15});};
@@ -125,9 +153,9 @@ function updatedStr(sec){
 }
 fetch('stations.json?v='+Date.now()).then(r=>r.json()).then(d=>{
   DATA=d;
-  const n=d.stations.length, yes=d.stations.filter(s=>effStatus(s)==='yes').length, q=d.stations.filter(s=>effStatus(s)==='queue').length;
-  document.getElementById('city').innerHTML=`${d.city} · ${n} АЗС · 🟢${yes} · 🟠${q}<br><span style="font-size:11px;color:#6f767e">🕒 ${updatedStr(d.updated)}</span>`;
-  map.setView(d.center,12); draw();
+  let saved=null; try{saved=localStorage.getItem(CKEY)}catch(e){}
+  CITY=(saved && d.cities.some(c=>c.name===saved)) ? saved : (d.default_city||d.cities[0].name);
+  buildCityBar(); setCity(CITY);
 });
 </script>
 </body>
