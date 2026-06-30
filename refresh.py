@@ -8,8 +8,8 @@ import json, urllib.request, os, sys, time
 
 # город: (center[lat,lon], bbox(lat1=S, lon1=W, lat2=N, lon2=E))
 CITIES = {
-    "Краснодар":     ([45.035, 39.03],  (45.00, 38.90, 45.15, 39.12)),
     "Новосибирск":   ([55.030, 82.92],  (54.80, 82.75, 55.15, 83.10)),
+    "Краснодар":     ([45.035, 39.03],  (45.00, 38.90, 45.15, 39.12)),
     "Екатеринбург":  ([56.838, 60.605], (56.74, 60.48, 56.92, 60.78)),
 }
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stations.json")
@@ -47,7 +47,7 @@ def main():
         per[city] = cnt
     data = {
         "cities": [{"name": c, "center": v[0]} for c, v in CITIES.items()],
-        "default_city": "Краснодар",
+        "default_city": "Новосибирск",
         "updated": int(time.time()),
         "stations": stations,
     }

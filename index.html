@@ -28,7 +28,9 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Ro
 .fuelbar button{flex:0 0 auto;background:#22252b;color:#cfe;border:1px solid #333a42;
   border-radius:13px;padding:4px 11px;font-size:12px;cursor:pointer;white-space:nowrap}
 .fuelbar button.on{background:#3ea37a;border-color:#3ea37a;color:#fff}
-.legend{position:absolute;bottom:88px;left:12px;z-index:1000;background:rgba(20,22,26,.92);
+/* зум-контрол по вертикали посередине правого края (не под верхними панелями) */
+.leaflet-top.leaflet-right{top:50%;transform:translateY(-50%)}
+.legend{position:absolute;bottom:24px;left:12px;z-index:1000;background:rgba(20,22,26,.92);
   color:#fff;border-radius:10px;padding:9px 11px;font-size:12.5px;line-height:1.75}
 .legend i{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:7px;vertical-align:middle}
 .fab{position:absolute;bottom:24px;right:16px;z-index:1000;background:#3ea37a;color:#fff;border:none;
@@ -160,8 +162,25 @@ function buildFuelBar(){
     if(g===GRADE)b.classList.add('on'); b.onclick=()=>setGrade(g); bar.appendChild(b);
   });
 }
+function saveCity(name){
+  try{localStorage.setItem(CKEY,name)}catch(e){}
+  try{ if(window.Telegram&&Telegram.WebApp&&Telegram.WebApp.CloudStorage&&Telegram.WebApp.CloudStorage.setItem)
+        Telegram.WebApp.CloudStorage.setItem(CKEY,name); }catch(e){}
+}
+function loadCity(cb){
+  try{
+    if(window.Telegram&&Telegram.WebApp&&Telegram.WebApp.CloudStorage&&Telegram.WebApp.CloudStorage.getItem){
+      Telegram.WebApp.CloudStorage.getItem(CKEY,function(err,val){
+        if(!err && val) return cb(val);
+        var ls=null; try{ls=localStorage.getItem(CKEY)}catch(e){}; cb(ls);
+      });
+      return;
+    }
+  }catch(e){}
+  var ls=null; try{ls=localStorage.getItem(CKEY)}catch(e){}; cb(ls);
+}
 function setCity(name){
-  CITY=name; try{localStorage.setItem(CKEY,name)}catch(e){}
+  CITY=name; saveCity(name);
   const c=(DATA.cities.find(x=>x.name===name)||{}).center;
   if(c) map.setView(c,12);
   document.querySelectorAll('#citybar button').forEach(b=>b.classList.toggle('on',b.dataset.city===name));
@@ -185,10 +204,11 @@ function updatedStr(sec){
   const h=Math.floor(m/60); return 'обновлено '+h+' ч назад';
 }
 fetch('stations.json?v='+Date.now()).then(r=>r.json()).then(d=>{
-  DATA=d;
-  let saved=null; try{saved=localStorage.getItem(CKEY)}catch(e){}
-  CITY=(saved && d.cities.some(c=>c.name===saved)) ? saved : (d.default_city||d.cities[0].name);
-  buildCityBar(); buildFuelBar(); setCity(CITY);
+  DATA=d; buildCityBar(); buildFuelBar();
+  loadCity(function(saved){
+    CITY=(saved && d.cities.some(c=>c.name===saved)) ? saved : (d.default_city||d.cities[0].name);
+    setCity(CITY);
+  });
 });
 </script>
 </body>
