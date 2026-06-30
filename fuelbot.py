@@ -134,6 +134,10 @@ PRO_PITCH=("⭐ Нужен Бензин Pro\n\n"
 def kb_loc():
     return json.dumps({"keyboard":[[{"text":"📍 Отправить геолокацию","request_location":True}]],
         "resize_keyboard":True,"one_time_keyboard":True})
+def kb_map_reply():
+    # reply-клавиатура с web_app: ТОЛЬКО так работает sendData из Mini App («Следить отсюда»)
+    return json.dumps({"keyboard":[[{"text":"🗺 Открыть карту","web_app":{"url":MAP_URL}}]],
+        "resize_keyboard":True,"is_persistent":True})
 def kb_fuels(chat):
     subs=jload(SUBS,{}); sel=set((subs.get(str(chat)) or {}).get("fuels",["95"]))
     btn=lambda g:{"text":("✅ " if g in sel else "")+g,"callback_data":"tf:"+g}
@@ -146,12 +150,27 @@ def kb_fuels(chat):
 WELCOME=("⛽ Нужен Бензин — карта наличия топлива.\nГорода: Краснодар, Новосибирск, Екатеринбург.\n\n"
     "🗺 Жми «Открыть карту» — видно, где есть/очередь/нет бензина прямо сейчас "
     "(выбери город сверху; данные обновляются и дополняются водителями).\n\n"
-    "🔔 «Следить» — пришли геолокацию, и я напишу, когда рядом с тобой на заправке "
-    "появится 95-й. У других карт такого нет.")
+    "🔔 Включи алерты: в карте жми «🔔 Следить отсюда» — пришлю, когда рядом появится "
+    "нужное топливо. У других карт такого нет.")
 
 def handle_message(m):
     chat=m["chat"]["id"]
     track(m.get("from"))
+    # данные из Mini App («Следить отсюда»): одно гео = центр карты + подписка на алерты
+    wad=m.get("web_app_data")
+    if wad:
+        try: data=json.loads(wad.get("data") or "{}")
+        except Exception: data={}
+        if data.get("action")=="sub" and data.get("lat") is not None:
+            subs=jload(SUBS,{}); prev=subs.get(str(chat)) or {}
+            subs[str(chat)]={"lat":float(data["lat"]),"lon":float(data["lon"]),
+                "radius":(PRO_RADIUS if is_pro(chat) else FREE_RADIUS),
+                "ts":time.time(),"sent":{},"fuels":prev.get("fuels",["95"])}
+            jsave(SUBS,subs)
+            api("sendMessage",{"chat_id":chat,
+                "text":"🔔 Готово! Слежу за бензином рядом с этой точкой. Напишу, как появится. За каким топливом?",
+                "reply_markup":kb_fuels(chat)})
+        return
     sp=m.get("successful_payment")
     if sp:
         days=int((sp.get("invoice_payload") or "pro:7").split(":")[1])
@@ -190,7 +209,8 @@ def handle_message(m):
         api("sendMessage",{"chat_id":chat,"text":"Спасибо! Отзыв отправлен 🙏","reply_markup":kb_main()})
         return
     if text.startswith("/start") or text.startswith("/help"):
-        api("sendMessage",{"chat_id":chat,"text":WELCOME,"reply_markup":kb_main()})
+        api("sendMessage",{"chat_id":chat,"text":WELCOME,"reply_markup":kb_map_reply()})
+        api("sendMessage",{"chat_id":chat,"text":"Действия 👇","reply_markup":kb_main()})
     elif text.startswith("/feedback"):
         FB_PENDING.add(chat)
         api("sendMessage",{"chat_id":chat,"text":"Напиши, что не так или что улучшить — передам разработчику 👇"})
