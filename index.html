@@ -12,118 +12,113 @@
 html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 #map{position:absolute;top:0;bottom:0;left:0;right:0}
 .topbar{position:absolute;top:0;left:0;right:0;z-index:1000;background:rgba(20,22,26,.92);
-  color:#fff;padding:10px 14px;display:flex;align-items:center;gap:10px;backdrop-filter:blur(6px)}
-.topbar b{font-size:15px}.topbar .city{color:#8a929c;font-size:13px;margin-left:auto}
-.demo-banner{position:absolute;top:44px;left:0;right:0;z-index:999;background:#b9842b;color:#fff;
-  font-size:12px;text-align:center;padding:4px 8px}
-.legend{position:absolute;bottom:84px;left:12px;z-index:1000;background:rgba(20,22,26,.92);
-  color:#fff;border-radius:10px;padding:9px 11px;font-size:12.5px;line-height:1.7}
+  color:#fff;padding:9px 14px;display:flex;align-items:center;gap:10px;backdrop-filter:blur(6px)}
+.topbar b{font-size:15px}.topbar .city{color:#8a929c;font-size:12px;margin-left:auto;text-align:right;line-height:1.3}
+.legend{position:absolute;bottom:88px;left:12px;z-index:1000;background:rgba(20,22,26,.92);
+  color:#fff;border-radius:10px;padding:9px 11px;font-size:12.5px;line-height:1.75}
 .legend i{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:7px;vertical-align:middle}
 .fab{position:absolute;bottom:24px;right:16px;z-index:1000;background:#3ea37a;color:#fff;border:none;
   width:54px;height:54px;border-radius:50%;font-size:24px;box-shadow:0 6px 18px rgba(0,0,0,.4)}
-.fab.reset{right:80px;background:#444b54;font-size:18px}
-.pop b{font-size:14px}.pop .fuels{margin-top:8px}
-.pop .frow{display:flex;align-items:center;gap:6px;margin:5px 0}
-.pop .frow span{flex:1;font-size:13px}
-.pop .frow button{border:none;border-radius:7px;padding:5px 10px;font-size:12px;font-weight:700;color:#fff;cursor:pointer}
-.pop .yes{background:#2e9e5b}.pop .no{background:#d2433a}
-.pop .st{font-size:11px;color:#888;margin-top:6px}
-.badge{font-size:10px;padding:1px 6px;border-radius:6px;color:#fff;margin-left:4px}
+.pop b{font-size:14px}.pop .cur{font-size:12px;margin-top:3px}
+.pop .chips{margin:7px 0 4px}
+.pop .chip{display:inline-block;background:#2a2e35;color:#cfe;border-radius:6px;padding:2px 7px;font-size:11px;margin:2px 3px 0 0}
+.pop .lbl{font-size:11px;color:#888;margin-top:9px}
+.pop .rep{display:flex;gap:6px;margin-top:6px}
+.pop .rep button{flex:1;border:none;border-radius:7px;padding:7px 4px;font-size:12px;font-weight:700;color:#fff;cursor:pointer}
+.pop .yes{background:#2e9e5b}.pop .queue{background:#d99423}.pop .no{background:#d2433a}
+.pop .fuelsel{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.pop .fuelsel button{border:1px solid #3a4049;background:#22252b;color:#cfe;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer}
+.pop .fuelsel button.on{background:#3ea37a;border-color:#3ea37a;color:#fff}
+.badge{font-size:10px;padding:1px 6px;border-radius:6px;color:#fff}
 </style>
 </head>
 <body>
 <div class="topbar"><b>⛽ Где бензин</b><span class="city" id="city">…</span></div>
-<div class="demo-banner" id="demoBanner">Демо-данные для показа. Тапни заправку → отметь наличие. «↺» — сбросить демо.</div>
 <div id="map"></div>
 <div class="legend">
-  <div><i style="background:#2e9e5b"></i>есть (свежий отчёт)</div>
+  <div><i style="background:#2e9e5b"></i>есть</div>
+  <div><i style="background:#d99423"></i>очередь / частично</div>
   <div><i style="background:#d2433a"></i>нет</div>
-  <div><i style="background:#9aa0a6"></i>нет данных / устарело</div>
+  <div><i style="background:#9aa0a6"></i>нет данных</div>
 </div>
-<button class="fab reset" onclick="resetDemo()" title="Сбросить демо">↺</button>
 <button class="fab" onclick="locate()" title="Где я">📍</button>
 
 <script>
-const FRESH_MS = 3*60*60*1000;        // отчёт «свежий» 3 часа
-const FUELS = [['ai95','АИ-95'],['ai92','АИ-92'],['dt','ДТ'],['gas','Газ']];
-const RKEY = 'fuelmap_reports_v1';
-let reports = load();
-let DATA = null, layer = null;
+const FRESH_MS = 3*60*60*1000;
+const FUELS = ['92','95','98','100','ДТ','Газ'];
+const RKEY = 'fuelmap_reports_v2';
+let reports = load();          // локальные отметки (Phase A): {id:{status, fuels:[], ts}}
+let DATA=null, layer=null, selFuel={};
 
 try{ if(window.Telegram&&Telegram.WebApp){Telegram.WebApp.expand();Telegram.WebApp.ready();} }catch(e){}
-
 function load(){ try{return JSON.parse(localStorage.getItem(RKEY))||{}}catch(e){return {}} }
 function save(){ localStorage.setItem(RKEY, JSON.stringify(reports)); }
+function fresh(r){ return r && (Date.now()-r.ts)<FRESH_MS; }
 
-function fresh(r){ return r && (Date.now()-r.ts) < FRESH_MS; }
-function ai95state(id){
-  const r = (reports[id]||{})['ai95'];
-  if(!fresh(r)) return 'unknown';
-  return r.status;                    // 'yes' | 'no'
+// эффективный статус точки: свежий локальный отчёт > статус из засева gdebenz
+function effStatus(s){
+  const r=reports[s.id];
+  if(fresh(r)) return r.status;
+  return s.status;            // 'yes'|'no'|'queue'|null
 }
-function color(id){
-  const s = ai95state(id);
-  return s==='yes' ? '#2e9e5b' : s==='no' ? '#d2433a' : '#9aa0a6';
+function effFuels(s){
+  const r=reports[s.id];
+  if(fresh(r) && r.fuels && r.fuels.length) return r.fuels.join(',');
+  return s.fuels_now||'';
 }
-function ago(ts){
-  const m = Math.floor((Date.now()-ts)/60000);
-  if(m<1) return 'только что'; if(m<60) return m+' мин назад';
-  const h=Math.floor(m/60); return h+' ч назад';
+function color(s){
+  const st=effStatus(s);
+  return st==='yes'?'#2e9e5b': st==='queue'?'#d99423': st==='no'?'#d2433a':'#9aa0a6';
 }
+function ago(ts){const m=Math.floor((Date.now()-ts)/60000);if(m<1)return'только что';if(m<60)return m+' мин назад';return Math.floor(m/60)+' ч назад';}
+function stLabel(st){return st==='yes'?'есть':st==='queue'?'очередь':st==='no'?'нет':'нет данных';}
 
-const map = L.map('map',{zoomControl:false});
+const map=L.map('map',{zoomControl:false});
 L.control.zoom({position:'topright'}).addTo(map);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-  {maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
 
 function popupHtml(s){
-  let rows = FUELS.map(([k,lbl])=>{
-    const r=(reports[s.id]||{})[k];
-    let st = fresh(r) ? `<span class="badge" style="background:${r.status==='yes'?'#2e9e5b':'#d2433a'}">${r.status==='yes'?'есть':'нет'} · ${ago(r.ts)}</span>` : '';
-    return `<div class="frow"><span>${lbl}${st}</span>
-      <button class="yes" onclick="report(${s.id},'${k}','yes')">Есть</button>
-      <button class="no" onclick="report(${s.id},'${k}','no')">Нет</button></div>`;
-  }).join('');
-  return `<div class="pop"><b>${s.name}</b>${s.addr?' · '+s.addr:''}<div class="fuels">${rows}</div>
-    <div class="st">Отметь, что видишь на этой заправке — поможет другим водителям.</div></div>`;
+  const st=effStatus(s), fuels=effFuels(s);
+  const r=reports[s.id];
+  const cur = `<span class="badge" style="background:${color(s)}">${stLabel(st)}</span>` +
+              (fresh(r)?` <span style="color:#888;font-size:11px">твоя отметка · ${ago(r.ts)}</span>`:'');
+  const chips = fuels ? `<div class="chips">Сейчас: ${fuels.split(',').map(f=>`<span class="chip">${f}</span>`).join('')}</div>` : '';
+  const sel = (selFuel[s.id]||[]);
+  const fuelBtns = FUELS.map(f=>`<button class="${sel.indexOf(f)>=0?'on':''}" onclick="togF('${s.id}','${f}')">${f}</button>`).join('');
+  return `<div class="pop"><b>${s.name}</b>${s.addr?' · '+s.addr:''}
+    <div class="cur">${cur}</div>${chips}
+    <div class="lbl">Отметить наличие (выбери топливо, если есть):</div>
+    <div class="fuelsel">${fuelBtns}</div>
+    <div class="rep">
+      <button class="yes" onclick="rep('${s.id}','yes')">Есть</button>
+      <button class="queue" onclick="rep('${s.id}','queue')">Очередь</button>
+      <button class="no" onclick="rep('${s.id}','no')">Нет</button>
+    </div></div>`;
 }
-
-function draw(){
-  if(layer) layer.remove();
-  layer = L.layerGroup().addTo(map);
-  DATA.stations.forEach(s=>{
-    const m = L.circleMarker([s.lat,s.lon],{radius:8,weight:2,color:'#fff',
-      fillColor:color(s.id),fillOpacity:1}).addTo(layer);
-    m.bindPopup(()=>popupHtml(s),{maxWidth:280});
-    s._m = m;
-  });
-}
-window.report = function(id,fuel,status){
-  reports[id]=reports[id]||{}; reports[id][fuel]={status,ts:Date.now()};
-  save();
-  const s=DATA.stations.find(x=>x.id===id); if(s&&s._m){s._m.setStyle({fillColor:color(id)});}
-  const s2=DATA.stations.find(x=>x.id===id); if(s2&&s2._m){s2._m.setPopupContent(popupHtml(s2));}
+window.togF=function(id,f){selFuel[id]=selFuel[id]||[];const i=selFuel[id].indexOf(f);i>=0?selFuel[id].splice(i,1):selFuel[id].push(f);const s=DATA.stations.find(x=>x.id===id);if(s&&s._m)s._m.setPopupContent(popupHtml(s));};
+window.rep=function(id,status){
+  reports[id]={status, fuels:(selFuel[id]||[]).slice(), ts:Date.now()}; save();
+  const s=DATA.stations.find(x=>x.id===id);
+  if(s&&s._m){s._m.setStyle({fillColor:color(s)});s._m.setPopupContent(popupHtml(s));}
   try{if(window.Telegram&&Telegram.WebApp&&Telegram.WebApp.HapticFeedback)Telegram.WebApp.HapticFeedback.impactOccurred('light');}catch(e){}
 };
 
-// ДЕМО-данные: детерминированно «раскрасим» часть АЗС, чтобы показать как выглядит
-function seedDemo(){
-  if(Object.keys(reports).length) {document.getElementById('demoBanner').style.display='none';return;}
-  DATA.stations.forEach((s,i)=>{
-    const h=(s.id%10);
-    if(h<3) reports[s.id]={ai95:{status:'no',ts:Date.now()-(s.id%150)*60000}};
-    else if(h<7) reports[s.id]={ai95:{status:'yes',ts:Date.now()-(s.id%170)*60000}};
-    // остальные — без данных
+function draw(){
+  if(layer)layer.remove();
+  layer=L.layerGroup().addTo(map);
+  DATA.stations.forEach(s=>{
+    const m=L.circleMarker([s.lat,s.lon],{radius:8,weight:2,color:'#fff',fillColor:color(s),fillOpacity:1}).addTo(layer);
+    m.bindPopup(()=>popupHtml(s),{maxWidth:290}); s._m=m;
   });
 }
-window.resetDemo=function(){ reports={}; save(); document.getElementById('demoBanner').style.display='none'; draw(); };
-window.locate=function(){ map.locate({setView:true,maxZoom:15}); };
+window.locate=function(){map.locate({setView:true,maxZoom:15});};
 map.on('locationfound',e=>{L.circleMarker(e.latlng,{radius:7,color:'#2d8cff',fillColor:'#2d8cff',fillOpacity:.9}).addTo(map);});
 
 fetch('stations.json?v='+Date.now()).then(r=>r.json()).then(d=>{
-  DATA=d; document.getElementById('city').textContent=d.city+' · '+d.stations.length+' АЗС';
-  map.setView(d.center, 12);
-  seedDemo(); save(); draw();
+  DATA=d;
+  const n=d.stations.length, yes=d.stations.filter(s=>effStatus(s)==='yes').length, q=d.stations.filter(s=>effStatus(s)==='queue').length;
+  document.getElementById('city').innerHTML=`${d.city} · ${n} АЗС<br>🟢${yes} есть · 🟠${q} очередь`;
+  map.setView(d.center,12); draw();
 });
 </script>
 </body>
