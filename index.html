@@ -116,10 +116,17 @@ function draw(){
 window.locate=function(){map.locate({setView:true,maxZoom:15});};
 map.on('locationfound',e=>{L.circleMarker(e.latlng,{radius:7,color:'#2d8cff',fillColor:'#2d8cff',fillOpacity:.9}).addTo(map);});
 
+function updatedStr(sec){
+  if(!sec) return '';
+  const m=Math.floor((Date.now()/1000-sec)/60);
+  if(m<1) return 'обновлено только что';
+  if(m<60) return 'обновлено '+m+' мин назад';
+  const h=Math.floor(m/60); return 'обновлено '+h+' ч назад';
+}
 fetch('stations.json?v='+Date.now()).then(r=>r.json()).then(d=>{
   DATA=d;
   const n=d.stations.length, yes=d.stations.filter(s=>effStatus(s)==='yes').length, q=d.stations.filter(s=>effStatus(s)==='queue').length;
-  document.getElementById('city').innerHTML=`${d.city} · ${n} АЗС<br>🟢${yes} есть · 🟠${q} очередь`;
+  document.getElementById('city').innerHTML=`${d.city} · ${n} АЗС · 🟢${yes} · 🟠${q}<br><span style="font-size:11px;color:#6f767e">🕒 ${updatedStr(d.updated)}</span>`;
   map.setView(d.center,12); draw();
 });
 </script>

@@ -6,7 +6,7 @@
 
 Usage: python3 refresh.py  (город/bbox задан ниже)
 """
-import json, urllib.request, os, sys
+import json, urllib.request, os, sys, time
 
 CITY = "Краснодар"
 CENTER = [45.035, 39.03]
@@ -39,7 +39,7 @@ def main():
             "conflict": x.get("conflict"),
             "src": "seed",                            # seed=засев из gdebenz; own=наш отчёт
         })
-    data = {"city": CITY, "center": CENTER, "stations": stations}
+    data = {"city": CITY, "center": CENTER, "updated": int(time.time()), "stations": stations}
     json.dump(data, open(OUT, "w"), ensure_ascii=False)
     from collections import Counter
     c = Counter(s["status"] for s in stations)
