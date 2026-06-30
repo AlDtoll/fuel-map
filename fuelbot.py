@@ -150,8 +150,10 @@ def kb_fuels(chat):
 WELCOME=("⛽ Нужен Бензин — карта наличия топлива.\nГорода: Краснодар, Новосибирск, Екатеринбург.\n\n"
     "🗺 Жми «Открыть карту» — видно, где есть/очередь/нет бензина прямо сейчас "
     "(выбери город сверху; данные обновляются и дополняются водителями).\n\n"
-    "🔔 Включи алерты: в карте жми «🔔 Следить отсюда» — пришлю, когда рядом появится "
-    "нужное топливо. У других карт такого нет.")
+    "🔔 Алерты — пришлю, когда рядом появится нужное топливо:\n"
+    "• Быстро: в карте жми «🔔 Следить отсюда».\n"
+    "• Лучше всего: 📎 → Геопозиция → «Транслировать» (1-8ч) — точка едет за тобой, "
+    "бот ищет вокруг текущего места, даже когда приложение закрыто.")
 
 def handle_message(m):
     chat=m["chat"]["id"]
@@ -186,17 +188,23 @@ def handle_message(m):
         return
     if "location" in m:
         loc=m["location"]
+        live=loc.get("live_period")            # >0 → это «Трансляция геопозиции»
         subs=jload(SUBS,{})
         prevsub=subs.get(str(chat)) or {}
+        rad=PRO_RADIUS if is_pro(chat) else FREE_RADIUS
         subs[str(chat)]={"lat":loc["latitude"],"lon":loc["longitude"],
-                         "radius":DEFAULT_RADIUS_KM,"ts":time.time(),"sent":{},
-                         "fuels":prevsub.get("fuels",["95"])}
+                         "radius":rad,"ts":time.time(),"sent":prevsub.get("sent",{}) if live else {},
+                         "fuels":prevsub.get("fuels",["95"]),"live":bool(live)}
         jsave(SUBS,subs)
-        api("sendMessage",{"chat_id":chat,
-            "text":f"🔔 Локация принята! Слежу в радиусе {DEFAULT_RADIUS_KM} км.\n"
-                   "За каким топливом следить? (по умолчанию 95) Отметь нужное:",
-            "reply_markup":json.dumps({"remove_keyboard":True})})
-        api("sendMessage",{"chat_id":chat,"text":"⛽ Топливо для алертов:","reply_markup":kb_fuels(chat)})
+        if live:
+            api("sendMessage",{"chat_id":chat,
+                "text":f"🛰 Трансляция включена! Слежу за бензином вокруг тебя (радиус {rad} км), "
+                       "точка едет за тобой, пока трансляция активна. За каким топливом?",
+                "reply_markup":kb_fuels(chat)})
+        else:
+            api("sendMessage",{"chat_id":chat,
+                "text":f"🔔 Точка принята! Слежу в радиусе {rad} км. За каким топливом?",
+                "reply_markup":kb_fuels(chat)})
         return
     text=m.get("text","")
     # режим отзыва: ждём текст от юзера → пересылаем Данилу
@@ -281,6 +289,15 @@ def handle_callback(cb):
             "text":f"🔔 Готово! Слежу за: {fl} (радиус {sub.get('radius',DEFAULT_RADIUS_KM)} км). "
                    "Напишу, как появится рядом. Отключить — /stop.","reply_markup":kb_main()})
 
+def handle_edited(em):
+    # движение во время «Трансляции геопозиции» — двигаем точку слежения
+    loc=em.get("location")
+    if not loc: return
+    chat=em["chat"]["id"]; subs=jload(SUBS,{}); sub=subs.get(str(chat))
+    if sub:
+        sub["lat"]=loc["latitude"]; sub["lon"]=loc["longitude"]; sub["live"]=True
+        subs[str(chat)]=sub; jsave(SUBS,subs)
+
 # ───────────────────────── цикл алертов ─────────────────────────
 def alert_loop():
     while True:
@@ -336,7 +353,7 @@ def main():
     threading.Thread(target=alert_loop, daemon=True).start()
     offset=None
     while True:
-        p={"timeout":50,"allowed_updates":json.dumps(["message","callback_query","pre_checkout_query"])}
+        p={"timeout":50,"allowed_updates":json.dumps(["message","edited_message","callback_query","pre_checkout_query"])}
         if offset is not None: p["offset"]=offset
         upd=api("getUpdates",p)
         if not upd.get("ok"): time.sleep(3); continue
@@ -344,6 +361,7 @@ def main():
             offset=u["update_id"]+1
             try:
                 if "message" in u: handle_message(u["message"])
+                elif "edited_message" in u: handle_edited(u["edited_message"])
                 elif "callback_query" in u: handle_callback(u["callback_query"])
                 elif "pre_checkout_query" in u:
                     api("answerPreCheckoutQuery",{"pre_checkout_query_id":u["pre_checkout_query"]["id"],"ok":"true"})
