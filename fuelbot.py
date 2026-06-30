@@ -17,7 +17,7 @@ DIR = os.path.expanduser("~/fuel-map")
 STATIONS = os.path.join(DIR, "stations.json")
 SUBS = os.path.join(DIR, "subscribers.json")
 LASTSTATE = os.path.join(DIR, "alert_state.json")
-MAP_URL = "https://aldtoll.github.io/fuel-map/"
+MAP_URL = "https://nuzhenbenzin.ru/"
 DEFAULT_RADIUS_KM = 5
 ALERT_COOLDOWN = 6*60*60          # не повторять алерт по той же АЗС юзеру 6ч
 POLL_ALERTS_SEC = 420             # цикл алертов ~7 мин
@@ -72,10 +72,14 @@ def station_link(st):
     return f"https://2gis.ru/geo/{st['lon']}%2C{st['lat']}"
 
 # ───────────────────────── команды/сообщения ─────────────────────────
+ADMIN_CHAT = 579387502           # отзывы пересылаются сюда (Данил)
+FB_PENDING = set()               # юзеры, от кого ждём текст отзыва
+
 def kb_main():
     return json.dumps({"inline_keyboard":[
         [{"text":"🗺 Открыть карту","web_app":{"url":MAP_URL}}],
         [{"text":"🔔 Следить за бензином рядом","callback_data":"watch"}],
+        [{"text":"💬 Отзыв / сообщить о проблеме","callback_data":"feedback"}],
     ]})
 def kb_loc():
     return json.dumps({"keyboard":[[{"text":"📍 Отправить геолокацию","request_location":True}]],
@@ -101,8 +105,20 @@ def handle_message(m):
             "reply_markup":json.dumps({"remove_keyboard":True})})
         return
     text=m.get("text","")
+    # режим отзыва: ждём текст от юзера → пересылаем Данилу
+    if chat in FB_PENDING and text and not text.startswith("/"):
+        FB_PENDING.discard(chat)
+        frm=m.get("from") or {}
+        un=("@"+frm["username"]) if frm.get("username") else (frm.get("first_name") or "")
+        api("sendMessage",{"chat_id":ADMIN_CHAT,
+            "text":f"💬 Отзыв (Есть Бензин)\nот {un} (id {chat}):\n\n{text}"})
+        api("sendMessage",{"chat_id":chat,"text":"Спасибо! Отзыв отправлен 🙏","reply_markup":kb_main()})
+        return
     if text.startswith("/start") or text.startswith("/help"):
         api("sendMessage",{"chat_id":chat,"text":WELCOME,"reply_markup":kb_main()})
+    elif text.startswith("/feedback"):
+        FB_PENDING.add(chat)
+        api("sendMessage",{"chat_id":chat,"text":"Напиши, что не так или что улучшить — передам разработчику 👇"})
     elif text.startswith("/stop"):
         subs=jload(SUBS,{}); subs.pop(str(chat),None); jsave(SUBS,subs)
         api("sendMessage",{"chat_id":chat,"text":"🔕 Слежение отключено. Включить снова — /start."})
@@ -116,6 +132,10 @@ def handle_callback(cb):
         api("sendMessage",{"chat_id":chat,
             "text":"Пришли свою геолокацию — и я буду следить за бензином рядом 👇",
             "reply_markup":kb_loc()})
+    elif cb.get("data")=="feedback":
+        FB_PENDING.add(chat)
+        api("sendMessage",{"chat_id":chat,
+            "text":"Напиши, что не так или что улучшить — передам разработчику 👇"})
 
 # ───────────────────────── цикл алертов ─────────────────────────
 def alert_loop():
