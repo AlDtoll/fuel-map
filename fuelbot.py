@@ -18,7 +18,7 @@ STATIONS = os.path.join(DIR, "stations.json")
 SUBS = os.path.join(DIR, "subscribers.json")
 LASTSTATE = os.path.join(DIR, "alert_state.json")
 MAP_URL = "https://nuzhenbenzin.ru/"
-DEFAULT_RADIUS_KM = 5
+DEFAULT_RADIUS_KM = 3
 ALERT_COOLDOWN = 6*60*60          # не повторять алерт по той же АЗС юзеру 6ч
 POLL_ALERTS_SEC = 300             # цикл алертов ~5 мин (Pro мгновенно, Free +FREE_DELAY)
 LOG = os.path.join(DIR, "bot.log")
@@ -84,7 +84,7 @@ def station_link(st):
 PRO_FILE = os.path.join(DIR, "pro_users.json")   # {str(uid): pro_until_epoch}
 PENDING_FILE = os.path.join(DIR, "alert_pending.json")
 PRO_PLANS = {"7": 49, "30": 149}                 # дней: цена в ⭐
-FREE_RADIUS = 5
+FREE_RADIUS = 3
 PRO_RADIUS = 15
 FREE_DELAY = 0                                   # задержку убрали: для бензина устаревший алерт = вред
                                                  # (алерт расходился с картой). Pro отличается радиусом/зонами.
