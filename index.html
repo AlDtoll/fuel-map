@@ -214,7 +214,7 @@ function buildCityBar(){
 }
 // Карта НЕ просит гео сама. Точку («ты здесь») даёт БОТ через URL ?lat=&lon=&r=
 const _P=new URLSearchParams(location.search);
-const ME={lat:parseFloat(_P.get('lat')),lon:parseFloat(_P.get('lon')),r:parseFloat(_P.get('r'))||5};
+const ME={lat:parseFloat(_P.get('lat')),lon:parseFloat(_P.get('lon')),r:parseFloat(_P.get('r'))||3};
 let meLayer=null;
 function showMe(){
   if(isNaN(ME.lat)||isNaN(ME.lon)) return;
