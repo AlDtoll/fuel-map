@@ -221,7 +221,7 @@ let meLayer=null;
 function showMe(){
   if(isNaN(ME.lat)||isNaN(ME.lon)) return;
   meLayer=L.layerGroup().addTo(map);
-  L.circle([ME.lat,ME.lon],{radius:ME.r*1000,color:'#2d8cff',weight:1,fillColor:'#2d8cff',fillOpacity:.07}).addTo(meLayer);
+  L.circle([ME.lat,ME.lon],{radius:ME.r*1000,color:'#2d8cff',weight:1,fillColor:'#2d8cff',fillOpacity:.07,interactive:false}).addTo(meLayer);
   L.circleMarker([ME.lat,ME.lon],{radius:8,color:'#fff',weight:3,fillColor:'#2d8cff',fillOpacity:1}).addTo(meLayer)
     .bindPopup('Ты здесь · слежу в радиусе '+ME.r+' км');
   map.setView([ME.lat,ME.lon],13);
